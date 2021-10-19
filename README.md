@@ -5,4 +5,4 @@ A small library for processing a [DAG](https://en.wikipedia.org/wiki/Directed_ac
 #### Space Complexity
 
 - **Best:** Ω(n)
-- **Worst:** O(n^2)
+- **Worst:** O(n log(n))
