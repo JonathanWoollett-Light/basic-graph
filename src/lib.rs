@@ -1,5 +1,8 @@
 use core::{fmt, fmt::Debug};
-use std::{collections::{HashMap, VecDeque}, hash::Hash};
+use std::{
+    collections::{HashMap, VecDeque},
+    hash::Hash,
+};
 
 /// Unweighted, directed graph (a tree where branches can join).
 ///
@@ -18,7 +21,7 @@ impl<T: Debug> UnweightedGraph<T> {
         }
     }
     /// Adds a node to the graph.
-    /// 
+    ///
     /// Every element in `parents` must correspond to an index in the underlying `vec<Node<T>>` (which stores nodes in the order they where inserted).
     /// ```
     /// // 1 -> {2,3}
@@ -56,24 +59,37 @@ impl<T: Debug> UnweightedGraph<T> {
     /// More precisely, each element at index `n` in `contiguous_set` is considered the parent of the element at index `n+1` in `contiguous_set`.
     ///
     /// The 1st element in `contiguous_set` must link to an existing element.
+    ///
+    /// `O(k * (n+k)/2)`: `k=contiguous_set.len()`, `n=self.len()`
+    ///
+    /// Since the insertion of each node in the given set may require searching the entire graph, we have `k` insertions of Onation `n, n+1, n+2, ..., n+k` averaging to `(n+k)/2` thus `k*(n+k)/2)`.
     pub fn modify_insert_contiguous_set(
         &mut self,
         find: fn(&T, &T) -> bool,
         modify: fn(&mut T, T),
         contiguous_set: Vec<T>,
     ) {
+        // imho this is nicer than wrapping whole functionality inside `if let Some(first) = iter.next() { ... }`.
+        if contiguous_set.is_empty() {
+            return;
+        }
         let mut iter = contiguous_set.into_iter();
         let first = iter.next().unwrap();
-        let mut set_parent_index = self.nodes.iter().enumerate().find_map(|(index, n)| {
-            if find(&n.data, &first) {
-                Some(index)
-            } else {
-                None
-            }
-        }).unwrap();
+        let mut set_parent_index = self
+            .nodes
+            .iter()
+            .enumerate()
+            .find_map(|(index, n)| {
+                if find(&n.data, &first) {
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .expect("1st element in set doesn't link to existing element.");
 
         for value in iter {
-            // Search for node under appropriate parent.
+            // Search for node under parent.
             let found_index_parent_opt =
                 self.nodes[set_parent_index]
                     .children
@@ -85,13 +101,14 @@ impl<T: Debug> UnweightedGraph<T> {
                             None
                         }
                     });
-            // If we found the node in its parent.
+            // If we found the node as a child of its parent.
             set_parent_index = if let Some(found_index) = found_index_parent_opt {
                 // Modify node
                 modify(&mut self.nodes[found_index].data, value);
                 found_index
+            // Else if we did not find the node under its parent
             } else {
-                // Search for node in whole graph
+                // Search for the node in the whole graph
                 let found_index_opt = self.nodes.iter().enumerate().find_map(|(index, node)| {
                     if find(&node.data, &value) {
                         Some(index)
@@ -103,13 +120,13 @@ impl<T: Debug> UnweightedGraph<T> {
                 if let Some(found_index) = found_index_opt {
                     // Modify node
                     modify(&mut self.nodes[found_index].data, value);
-                    // Set as child of parent from set
+                    // Set as child of the parent from the set
                     self.nodes[set_parent_index].children.push(found_index);
                     found_index
                 }
                 // If couldn't find the node in the graph.
                 else {
-                    // We add the node to the graph, to the parent from the set.
+                    // We add the node to the graph, as a child of its parent from the set.
                     self.add(vec![set_parent_index], value)
                 }
             }
@@ -120,46 +137,65 @@ impl<T: Debug> UnweightedGraph<T> {
     }
 }
 impl<T: Clone> UnweightedGraph<T> {
-    /// Starting at `self.nodes[0]` with `self.nodes[0].data` folds the `T` value through the graph via `modify` selecting the 1st children of each parent 
+    /// Starting at `self.nodes[0]` with `self.nodes[0].data` folds the `T` value through the graph via `modify` selecting the 1st children of each parent
     /// for which `find` returns true, given the respective value from `set`, returning when no child of the current node causes `find` to be true.
     ///
     /// It must be possible to fold through the given set with this graph.
-    pub fn fold_through_set<P>(&self, set: Vec<P>, find: fn(&T,&P)->bool, modify: fn(T,&T)->T) -> T {
+    pub fn fold_through_set<P>(
+        &self,
+        set: Vec<P>,
+        find: fn(&T, &P) -> bool,
+        modify: fn(T, &T) -> T,
+    ) -> T {
         let mut value = self.nodes[0].data.clone();
         let cur = &self.nodes[0];
         for set_value in set.into_iter() {
-            let next = cur.children.iter().find(|&&child_index|find(&self.nodes[child_index].data,&set_value)).unwrap();
-            value = modify(value,&self.nodes[*next].data);
+            let next = cur
+                .children
+                .iter()
+                .find(|&&child_index| find(&self.nodes[child_index].data, &set_value))
+                .unwrap();
+            value = modify(value, &self.nodes[*next].data);
         }
         value
     }
 }
-impl<T: Clone+Debug> UnweightedGraph<T> {
+impl<T: Clone + Debug> UnweightedGraph<T> {
     /// Folds an accumulator through the graph in breadth first order, applying the modification only on nodes for which the evaluation function `eval` returns false, and only exploring children of nodes for which the evaluation function `eval` returns true.
     ///
     /// With a bunch of adjustments to allow for using external evaluation data and caching these evaluations between usages.
     ///
-    /// For every node `index` this must be true: `eval_data.get(KEY::from(&self.nodes[index].data)).is_some || eval_map.get(KEY::from(&self.nodes[index].data)).is_some`.
-    pub fn fold_filter_negative<'a, KEY: Eq + Hash,DATA: Debug, EVAL_PARAMETERS>(
-        &'a self, 
-        mut acc:T, // Accumulator like typical `fold`
-        eval: fn(&DATA,&EVAL_PARAMETERS)->bool, // Evaluates node per respective evaluation data
-        eval_parameters: &EVAL_PARAMETERS,
-        eval_data: &HashMap<KEY,DATA>, // Link graph data to evaluation data
-        eval_map: &mut HashMap<KEY,bool>, // Caching results of evaluation
-        modify: fn(T,&T)->T, // typical `fold` function
-        key_from_data: fn(&T)->KEY
+    /// For every node `index` this must be true: `eval_data.get(key_from_data(self.nodes[index].data)).is_some || eval_map.get(key_from_data(&self.nodes[index].data)).is_some`.
+    pub fn fold_filter_negative<'a, Key: Eq + Hash, Data: Debug, EvalParameters>(
+        &'a self,
+        // Accumulator like typical `fold`
+        mut acc: T,
+        // Evaluates node per respective evaluation data
+        eval: fn(&Data, &EvalParameters) -> bool,
+        // Any additional evlauation paramters.
+        eval_parameters: &EvalParameters,
+        // Link graph data to evaluation data
+        eval_data: &HashMap<Key, Data>,
+        // Caching results of evaluation
+        eval_map: &mut HashMap<Key, bool>,
+        // typical `fold` function
+        modify: fn(T, &T) -> T,
+        key_from_data: fn(&T) -> Key,
     ) -> T {
-        let mut visited = vec![false;self.nodes.len()];
+        let mut visited = vec![false; self.nodes.len()];
         let mut queue = VecDeque::new();
 
-        
-        if UnweightedGraph::evaluation(&self.nodes[0].data,eval,eval_parameters,eval_data,eval_map,key_from_data) {
-            
+        if UnweightedGraph::evaluation(
+            &self.nodes[0].data,
+            eval,
+            eval_parameters,
+            eval_data,
+            eval_map,
+            key_from_data,
+        ) {
             visited[0] = true;
             queue.push_back(0);
             while let Some(next) = queue.pop_front() {
-
                 // println!("{}:",next);
 
                 for &child in self.nodes[next].children.iter() {
@@ -168,39 +204,50 @@ impl<T: Clone+Debug> UnweightedGraph<T> {
 
                         // print!("\t{}:({:.?}) | {:.?}",child,self.nodes[child].data,acc);
 
-                        if UnweightedGraph::evaluation(&self.nodes[child].data,eval,eval_parameters,eval_data,eval_map,key_from_data) {
+                        if UnweightedGraph::evaluation(
+                            &self.nodes[child].data,
+                            eval,
+                            eval_parameters,
+                            eval_data,
+                            eval_map,
+                            key_from_data,
+                        ) {
                             queue.push_back(child);
 
                             // println!();
-                        }
-                        else {
+                        } else {
                             // We modify the accumulator based on the first negative children of a path through the graph
-                            // E.g. If we have a graph of ((x,y),a..b) and want to find the subset range x..z of a..b where 
-                            //  all (x,y)s are true, we want to progressively exclude the ranges a_n..b_n where (x_n,y_n) 
-                            //  are false. 
-                            // In our specific application if all parent of a node are false, then the 
-                            //  child is false, and furthermore this means the children of this child 
-                            //  (which only have this child as their parent) have ranges which are a 
+                            // E.g. If we have a graph of ((x,y),a..b) and want to find the subset range x..z of a..b where
+                            //  all (x,y)s are true, we want to progressively exclude the ranges a_n..b_n where (x_n,y_n)
+                            //  are false.
+                            // In our specific application if all parent of a node are false, then the
+                            //  child is false, and furthermore this means the children of this child
+                            //  (which only have this child as their parent) have ranges which are a
                             //  subset of this child's range and will not restrict the overall range.
-                            //  Thus if a node is negative we need not explore its children, if 
-                            //   some of its children are useful to explore there will be a positive 
-                            //   node which links to them. Thus can explore these useful children 
+                            //  Thus if a node is negative we need not explore its children, if
+                            //   some of its children are useful to explore there will be a positive
+                            //   node which links to them. Thus can explore these useful children
                             //   through that node.
-                            acc = modify(acc,&self.nodes[child].data);
+                            acc = modify(acc, &self.nodes[child].data);
 
                             // println!("->{:.?}",acc);
                         }
                     }
-                    
                 }
             }
-        }
-        else {
-            acc = modify(acc,&self.nodes[0].data);
+        } else {
+            acc = modify(acc, &self.nodes[0].data);
         }
         return acc;
     }
-    fn evaluation<'a, KEY: Eq + Hash,DATA: Debug, EVAL_PARAMETERS>(data: &'a T, eval: fn(&DATA,&EVAL_PARAMETERS)->bool,eval_parameters: &EVAL_PARAMETERS, eval_data: &HashMap<KEY,DATA>,eval_map: &mut HashMap<KEY,bool>,key_from_data: fn(&T)->KEY) -> bool {
+    fn evaluation<'a, Key: Eq + Hash, Data: Debug, EvalParameters>(
+        data: &'a T,
+        eval: fn(&Data, &EvalParameters) -> bool,
+        eval_parameters: &EvalParameters,
+        eval_data: &HashMap<Key, Data>,
+        eval_map: &mut HashMap<Key, bool>,
+        key_from_data: fn(&T) -> Key,
+    ) -> bool {
         let key = key_from_data(data);
         match eval_map.get(&key) {
             Some(&cached) => cached,
@@ -209,7 +256,7 @@ impl<T: Clone+Debug> UnweightedGraph<T> {
 
                 // print!(" {{{:.?}}}",data);
 
-                let temp_eval = eval(data,eval_parameters);
+                let temp_eval = eval(data, eval_parameters);
                 eval_map.insert(key, temp_eval);
                 temp_eval
             }
@@ -219,7 +266,7 @@ impl<T: Clone+Debug> UnweightedGraph<T> {
 /// Adds many nodes consecutively to a graph.
 ///
 /// Simply calls [`add`](UnweightedGraph<T>::add) on all elements.
-/// 
+///
 /// Every element in `parents` must correspond to an index in the underlying `vec<Node<T>>` (which stores nodes in the order they where inserted).
 /// ```
 /// // 1 -> {2,3}
