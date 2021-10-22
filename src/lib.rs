@@ -305,6 +305,7 @@ impl<T: Debug> From<(T, Vec<(Vec<usize>, T)>)> for UnweightedGraph<T> {
     }
 }
 impl<'a, T: Debug> UnweightedGraph<T> {
+    /// Breadth first iterator.
     pub fn iter(&'a self) -> UnweightedGraphCounter<'a, T> {
         UnweightedGraphCounter::new(&self)
     }
