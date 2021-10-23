@@ -66,7 +66,7 @@ mod tests {
     #[test]
     fn application() {
         // The width of the space
-        const W: usize = 100;
+        const W: usize = 500;
         // The range of possible values we consider for the parameters forming our line.
         const VALUE_RANGE: std::ops::Range<f32> = 1f32..10f32;
         // When constructing our graph we brute force through equation, this determines the
@@ -81,7 +81,7 @@ mod tests {
         let mut t_value = VALUE_RANGE.start;
 
         let initial_points = (0..2 * W)
-            .map(|p| (function(t_value, p as f32) as usize, p))
+            .map(|p| (curve_function(t_value, p as f32) as usize, p))
             .collect::<Vec<_>>();
         // println!("initial_points: {:.3}->{:.?}", t_value,initial_points);
 
@@ -94,16 +94,17 @@ mod tests {
         // println!("\ngraph: {}\n",graph);
 
         let mut prev_time = Duration::new(0, 0);
-        let mut interval_print = Instant::now();
-        let total_calc_time = Instant::now();
+        // let mut interval_print = Instant::now();
+        // let total_calc_time = Instant::now();
 
         t_value += STEP;
+        // println!("{: <6}",format!("{:.2}", VALUE_RANGE.end));
         while t_value <= VALUE_RANGE.end {
             // print!("\r{: <6}", format!("{:.2}", t_value));
 
             let start = Instant::now();
             let points = (0..2 * W)
-                .map(|p| (function(t_value, p as f32) as usize, p))
+                .map(|p| (curve_function(t_value, p as f32) as usize, p))
                 .collect::<Vec<_>>();
             prev_time += start.elapsed();
 
@@ -118,18 +119,19 @@ mod tests {
 
             // println!("\ngraph: {}\n", graph);
             t_value += STEP;
-            if interval_print.elapsed() > Duration::from_secs(1) {
-                print!(
-                    "\r{: <6} {:?}    ",
-                    format!("{:.2}", t_value),
-                    total_calc_time.elapsed()
-                );
-                interval_print = Instant::now();
-            }
+            // if interval_print.elapsed() > Duration::from_secs(1) {
+            //     print!(
+            //         "\r{: <6} {:?}    ",
+            //         format!("{:.2}", t_value),
+            //         total_calc_time.elapsed()
+            //     );
+            //     interval_print = Instant::now();
+            // }
         }
+        // println!();
 
         println!(
-            "\nfinal_graph: {} Vs {} ({}kb)",
+            "final_graph: {} Vs {} ({}kb)",
             ((VALUE_RANGE.end - VALUE_RANGE.start) / STEP) as usize,
             graph.len(),
             graph.len() * std::mem::size_of::<((usize, usize), std::ops::Range<f32>)>() / 1000
@@ -157,7 +159,7 @@ mod tests {
         let angle_to_fit = line_to_fit as f32 * STEP + VALUE_RANGE.start;
         println!("angle_to_fit: {}", angle_to_fit);
         for p in 0..2 * W {
-            let (i, j) = (function(angle_to_fit, p as f32) as usize, p);
+            let (i, j) = (curve_function(angle_to_fit, p as f32) as usize, p);
             space[i][j] = 99;
         }
 
@@ -187,19 +189,18 @@ mod tests {
             })
             .collect::<HashMap<(usize, usize), u8>>();
 
-        let mut cached_evaluations = HashMap::new();
-
         let start = Instant::now();
         let (_, interval) = graph.fold_filter_negative(
             ((0, 0), VALUE_RANGE),
             // Modify the accumulator on nodes where x>20.
             // Which is to say, search for a line where all cells it passes through have a value less than `<=20`.
-            |&x, _: &()| x > 20,
-            &(),
+            |&x| x > 20,
+            // The hashmap of coordinates to cell values.
             &space_map,
-            &mut cached_evaluations,
+            // Modifiy accumulator such that it is disjoint with the ranges in nodes which don't satify `|&x| x > 20`.
             |a, b| disjoin(a, b),
-            key_from_data,
+            // Extract coordinates from stored data
+            |(a,_)|*a,
         );
         println!(
             "interval: {:.?} {:.?} Vs {:.?}",
@@ -208,13 +209,12 @@ mod tests {
             prev_time
         );
 
-        assert!(interval.contains(&angle_to_fit));
+        const ALLOWED: f32 = 10. * STEP;
+        println!("ALLOWED: {}",ALLOWED);
+        assert!(interval.start - ALLOWED < angle_to_fit && interval.end + ALLOWED > angle_to_fit,"!({:?}).contains({})",(interval.start - ALLOWED)..(interval.end + ALLOWED),angle_to_fit);
 
-        fn key_from_data((a, _): &((usize, usize), std::ops::Range<f32>)) -> (usize, usize) {
-            *a
-        }
         // `t`: Curve constant of line, `x`: x coordinate.
-        fn function(t: f32, x: f32) -> f32 {
+        fn curve_function(t: f32, x: f32) -> f32 {
             let r = (W.pow(2) as f32 + t.powi(2)) / (2. * t);
             (r.powi(2) - (x - W as f32).powi(2)).sqrt() - (r.powi(2) - W.pow(2) as f32).sqrt()
         }

@@ -166,18 +166,14 @@ impl<T: Clone + Debug> UnweightedGraph<T> {
     /// With a bunch of adjustments to allow for using external evaluation data and caching these evaluations between usages.
     ///
     /// For every node `index` this must be true: `eval_data.get(key_from_data(self.nodes[index].data)).is_some || eval_map.get(key_from_data(&self.nodes[index].data)).is_some`.
-    pub fn fold_filter_negative<'a, Key: Eq + Hash, Data: Debug, EvalParameters>(
+    pub fn fold_filter_negative<'a, Key: Eq + Hash, Data: Debug>(
         &'a self,
         // Accumulator like typical `fold`
         mut acc: T,
         // Evaluates node per respective evaluation data
-        eval: fn(&Data, &EvalParameters) -> bool,
-        // Any additional evlauation paramters.
-        eval_parameters: &EvalParameters,
+        eval: fn(&Data) -> bool,
         // Link graph data to evaluation data
         eval_data: &HashMap<Key, Data>,
-        // Caching results of evaluation
-        eval_map: &mut HashMap<Key, bool>,
         // typical `fold` function
         modify: fn(T, &T) -> T,
         key_from_data: fn(&T) -> Key,
@@ -185,14 +181,7 @@ impl<T: Clone + Debug> UnweightedGraph<T> {
         let mut visited = vec![false; self.nodes.len()];
         let mut queue = VecDeque::new();
 
-        if UnweightedGraph::evaluation(
-            &self.nodes[0].data,
-            eval,
-            eval_parameters,
-            eval_data,
-            eval_map,
-            key_from_data,
-        ) {
+        if UnweightedGraph::evaluation(&self.nodes[0].data, eval, eval_data, key_from_data) {
             visited[0] = true;
             queue.push_back(0);
             while let Some(next) = queue.pop_front() {
@@ -207,9 +196,7 @@ impl<T: Clone + Debug> UnweightedGraph<T> {
                         if UnweightedGraph::evaluation(
                             &self.nodes[child].data,
                             eval,
-                            eval_parameters,
                             eval_data,
-                            eval_map,
                             key_from_data,
                         ) {
                             queue.push_back(child);
@@ -240,27 +227,16 @@ impl<T: Clone + Debug> UnweightedGraph<T> {
         }
         return acc;
     }
-    fn evaluation<'a, Key: Eq + Hash, Data: Debug, EvalParameters>(
+    fn evaluation<'a, Key: Eq + Hash, Data: Debug>(
         data: &'a T,
-        eval: fn(&Data, &EvalParameters) -> bool,
-        eval_parameters: &EvalParameters,
+        eval: fn(&Data) -> bool,
         eval_data: &HashMap<Key, Data>,
-        eval_map: &mut HashMap<Key, bool>,
         key_from_data: fn(&T) -> Key,
     ) -> bool {
         let key = key_from_data(data);
-        match eval_map.get(&key) {
-            Some(&cached) => cached,
-            None => {
-                let data = eval_data.get(&key).unwrap();
-
-                // print!(" {{{:.?}}}",data);
-
-                let temp_eval = eval(data, eval_parameters);
-                eval_map.insert(key, temp_eval);
-                temp_eval
-            }
-        }
+        let data = eval_data.get(&key).unwrap();
+        let temp_eval = eval(data);
+        temp_eval
     }
 }
 /// Adds many nodes consecutively to a graph.
