@@ -51,7 +51,8 @@ mod tests {
         let breadth_first = graph.iter().cloned().collect::<Vec<_>>();
         assert_eq!(vec![1, 2, 3, 4, 5, 6, 7, 8, 9], breadth_first);
     }
-    // Consider a problem, we searching for a line like `y=f(a,b,...)` in a MxN space.
+    // Consider a problem, we are searching for a line like `y=f(x,a,b,...)` in a MxN space
+    //  (whereh `a,b,...` are constants).
     // Alternatively to simply brute force searching, we can construct a graph of the size of the
     //  space MxN, where each node contains the combinations of the parameters (a,b,...) for each
     //  line which passes through the cell this node is respective to.
@@ -59,13 +60,13 @@ mod tests {
     //  search fold through our graph, starting with the full range, we can then progressively
     //  subtract possible values at each leaf node, leaving us with the combinations of paramters
     //  for all lines which fit.
-    // In specific cases we can swap storing combinations of paramters in our nodes for ranges of
-    //  paratemeters (I beleive this is only viable when our equation forms a convex line), this
-    //  allows us to search faster and more accurately.
+    // In the specific case where we have 1 parameter we can swap storing combinations of
+    //  paramters in our nodes for a range of this parameter, this allows us to search
+    //  faster and more accurately.
     #[test]
     fn application() {
         // The width of the space
-        const W: usize = 1000;
+        const W: usize = 100;
         // The range of possible values we consider for the parameters forming our line.
         const VALUE_RANGE: std::ops::Range<f32> = 1f32..10f32;
         // When constructing our graph we brute force through equation, this determines the
@@ -108,7 +109,7 @@ mod tests {
 
             graph.modify_insert_contiguous_set(
                 |((ai, aj), _), ((bi, bj), _)| ai == bi && aj == bj,
-                |(_, graph_range), (_, set_range)| range_add_assign(graph_range, set_range),
+                |(_, graph_range), (_, set_range)| cover_range(graph_range, set_range),
                 points
                     .into_iter()
                     .map(|p| (p, t_value..t_value + STEP))
@@ -117,9 +118,9 @@ mod tests {
 
             // println!("\ngraph: {}\n", graph);
             t_value += STEP;
-            if interval_print.elapsed() > Duration::from_secs(5) {
-                println!(
-                    "{: <6} {:.3?}",
+            if interval_print.elapsed() > Duration::from_secs(1) {
+                print!(
+                    "\r{: <6} {:?}    ",
                     format!("{:.2}", t_value),
                     total_calc_time.elapsed()
                 );
@@ -197,7 +198,7 @@ mod tests {
             &(),
             &space_map,
             &mut cached_evaluations,
-            |a, b| range_sub_assign(a, b),
+            |a, b| disjoin(a, b),
             key_from_data,
         );
         println!(
@@ -207,26 +208,23 @@ mod tests {
             prev_time
         );
 
+        assert!(interval.contains(&angle_to_fit));
+
         fn key_from_data((a, _): &((usize, usize), std::ops::Range<f32>)) -> (usize, usize) {
             *a
         }
+        // `t`: Curve constant of line, `x`: x coordinate.
         fn function(t: f32, x: f32) -> f32 {
             let r = (W.pow(2) as f32 + t.powi(2)) / (2. * t);
             (r.powi(2) - (x - W as f32).powi(2)).sqrt() - (r.powi(2) - W.pow(2) as f32).sqrt()
         }
     }
-    // Subtracts `other` from `this` such that `this` is modified to not overlap `other`.
+    // Modifies `this` to be disjoint from `other`.
     // Does not work when `other` covers `this` or vice-versa.
-    fn range_sub_assign(
+    fn disjoin(
         (_, mut this): ((usize, usize), std::ops::Range<f32>),
         (b, other): &((usize, usize), std::ops::Range<f32>),
     ) -> ((usize, usize), std::ops::Range<f32>) {
-        // print!(
-        //     "\t sub: {:.?} {:.?}\t {} {} {}",
-        //     this,other,other.end >= this.end && other.start < this.end && other.start > this.start,
-        //     other.end > this.start && other.end < this.end && other.start <= this.start,
-        //     other.end < this.end && other.start > this.start
-        // );
         #[cfg(debug_assertions)]
         {
             if other.start < this.start && other.end > this.end {
@@ -244,25 +242,10 @@ mod tests {
             this.end = other.start
         }
 
-        // // If `other` intersects upper part of `this`
-        // if other.end > this.end && other.start < this.end && other.start > this.start {
-        //     this.end = other.start;
-
-        // }
-        // // If `other` intersects lower part of `this`
-        // else if other.end > this.start && other.end < this.end && other.start <= this.start {
-        //     this.start = other.end;
-        // }
-        // // If `other` is covered by `this`
-        // else if other.end < this.end && other.start > this.start {
-        //     this.start = other.start;
-        //     this.end = other.end;
-        // }
-
         (*b, this)
     }
-    // Adds two ranges together producing a new range which covers both original ranges.
-    fn range_add_assign(this: &mut std::ops::Range<f32>, other: std::ops::Range<f32>) {
+    // Modifies `this` to extend it to cover `other`.
+    fn cover_range(this: &mut std::ops::Range<f32>, other: std::ops::Range<f32>) {
         *this = std::ops::Range {
             start: if this.start < other.start {
                 this.start
